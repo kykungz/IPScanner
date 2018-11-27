@@ -5,6 +5,7 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
+import java.io.IOException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InterfaceAddress;
@@ -12,14 +13,14 @@ import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.stream.Collectors;
 
 import javax.swing.BoxLayout;
+import javax.swing.Icon;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -53,16 +54,21 @@ public class App {
 	private JLabel pinging;
 	private JLabel thread;
 
+	private Icon red, green, yellow;
+
 	private int onlineCount, offlineCount, pingCount;
 
 	public App() {
+		this.red = new ImageIcon(this.getClass().getResource("/assets/red.png"));
+		this.green = new ImageIcon(this.getClass().getResource("/assets/green.png"));
+		this.yellow = new ImageIcon(this.getClass().getResource("/assets/yellow.png"));
 		this.frame = new JFrame("IP Scanner");
 		this.start = new JTextField(10);
 		this.end = new JTextField(10);
 		this.maxThread = new JTextField(5);
 		this.maxThread.setText("10");
 		this.maxTimeout = new JTextField(5);
-		this.maxTimeout.setText("5000");
+		this.maxTimeout.setText("1");
 		this.online = new JLabel("Online: 0");
 		this.offline = new JLabel("Offline: 0");
 		this.pinging = new JLabel("Pinging: 0");
@@ -92,7 +98,7 @@ public class App {
 		JPanel maxTimeoutPanel = new JPanel();
 		maxTimeoutPanel.setAlignmentX(Component.CENTER_ALIGNMENT);
 		maxTimeoutPanel.setLayout(new BoxLayout(maxTimeoutPanel, BoxLayout.X_AXIS));
-		JLabel timeoutLabel = new JLabel("Timeout(ms):");
+		JLabel timeoutLabel = new JLabel("Timeout(s):");
 		maxTimeoutPanel.add(timeoutLabel);
 		maxTimeoutPanel.add(maxTimeout);
 
@@ -193,43 +199,45 @@ public class App {
 		while (hasNextIP()) {
 			nextIP();
 			String currentIP = this.currentIP;
-			Future<InetAddress> future = executorService.submit(() -> {
+			Future<?> future = executorService.submit(() -> {
 				this.thread.setText(
 						"Thread: " + executorService.getActiveCount() + "/" + executorService.getMaximumPoolSize());
-				if (Thread.currentThread().isInterrupted()) {
-					return null;
-				}
-				tableModel.addRow(new Object[] { new ImageIcon(this.getClass().getResource("/assets/yellow.png")),
-						currentIP, "" });
+				tableModel.addRow(new Object[] { yellow, currentIP, "" });
 				long startTime = System.currentTimeMillis();
 				updateNumber(0);
 				this.pinging.setText("Pinging: " + this.pingCount);
-				boolean isReachable = Inet4Address.getByName(currentIP)
-						.isReachable(Integer.parseInt(this.maxTimeout.getText()));
-				if (Thread.currentThread().isInterrupted()) {
-					return null;
+				Process p1;
+				int returnVal = 9999;
+				try {
+					p1 = java.lang.Runtime.getRuntime().exec(
+							String.format("ping -c 1 -t %d %s", Integer.parseInt(maxThread.getText()), currentIP));
+					returnVal = p1.waitFor();
+				} catch (IOException e1) {
+					e1.printStackTrace();
+				} catch (InterruptedException e1) {
+					e1.printStackTrace();
 				}
+				System.out.println(currentIP + " - returned " + returnVal);
+				boolean isReachable = (returnVal == 0);
 				if (isReachable) {
 					long ping = System.currentTimeMillis() - startTime;
-					tableModel.setValueAt(new ImageIcon(this.getClass().getResource("/assets/green.png")),
-							getRowIndex(currentIP), COLUMN_STATUS);
+					tableModel.setValueAt(green, getRowIndex(currentIP), COLUMN_STATUS);
 					tableModel.setValueAt(ping + "ms", getRowIndex(currentIP), COLUMN_PING);
 					updateNumber(1);
 					this.online.setText("Online: " + this.onlineCount);
-					return Inet4Address.getByName(currentIP);
+					System.out.println(currentIP + " - Online");
 				} else {
-					tableModel.setValueAt(new ImageIcon(this.getClass().getResource("/assets/red.png")),
-							getRowIndex(currentIP), COLUMN_STATUS);
+					tableModel.setValueAt(red, getRowIndex(currentIP), COLUMN_STATUS);
 					tableModel.setValueAt("-", getRowIndex(currentIP), COLUMN_PING);
 					updateNumber(-1);
 					this.offline.setText("Offline: " + this.offlineCount);
-					return null;
+					System.out.println(currentIP + " - Offline");
 				}
 			});
 		}
 	}
 
-	private synchronized void updateNumber(int amount) {
+	private void updateNumber(int amount) {
 		if (amount == 1) {
 			this.onlineCount++;
 			this.pingCount--;
