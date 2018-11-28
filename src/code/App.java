@@ -5,7 +5,9 @@ import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.ActionEvent;
+import java.beans.PropertyChangeListener;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InterfaceAddress;
@@ -13,12 +15,14 @@ import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.Arrays;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import javax.swing.AbstractAction;
+import javax.swing.Action;
 import javax.swing.BoxLayout;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
@@ -29,6 +33,7 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 import javax.swing.table.TableModel;
@@ -53,6 +58,8 @@ public class App {
 	private JLabel offline;
 	private JLabel pinging;
 	private JLabel thread;
+	private JLabel currentIPLabel;
+	private JLabel subnetLabel;
 
 	private Icon red, green, yellow;
 
@@ -67,12 +74,14 @@ public class App {
 		this.end = new JTextField(10);
 		this.maxThread = new JTextField(5);
 		this.maxThread.setText("10");
-		this.maxTimeout = new JTextField(5);
+		this.maxTimeout = new JTextField(2);
 		this.maxTimeout.setText("1");
 		this.online = new JLabel("Online: 0");
 		this.offline = new JLabel("Offline: 0");
 		this.pinging = new JLabel("Pinging: 0");
 		this.thread = new JLabel("Threads: 0");
+		this.currentIPLabel = new JLabel("Your IP:");
+		this.subnetLabel = new JLabel("Subnet Mask: 0");
 
 		JPanel startPanel = new JPanel();
 		startPanel.setLayout(new BoxLayout(startPanel, BoxLayout.X_AXIS));
@@ -102,18 +111,27 @@ public class App {
 		maxTimeoutPanel.add(timeoutLabel);
 		maxTimeoutPanel.add(maxTimeout);
 
-		JButton button = new JButton("Scan now");
-		button.addActionListener(this::onScanClicked);
+		JButton scanButton = new JButton("Scan now");
+		scanButton.addActionListener(this::onScanClicked);
+
+		JButton cancelButton = new JButton("Stop");
+		cancelButton.addActionListener((e) -> {
+			executorService.shutdownNow();
+		});
 
 		FlowLayout layout = new FlowLayout(FlowLayout.CENTER);
-		layout.setHgap(20);
+		layout.setHgap(10);
+		layout.setVgap(10);
 		JPanel optionPane = new JPanel(layout);
-		optionPane.setPreferredSize(new Dimension(200, 80));
+		optionPane.setPreferredSize(new Dimension(240, 110));
+		optionPane.add(currentIPLabel);
+		optionPane.add(subnetLabel);
 		optionPane.add(startPanel);
 		optionPane.add(endPanel);
 		optionPane.add(maxThreadPanel);
 		optionPane.add(maxTimeoutPanel);
-		optionPane.add(button);
+		optionPane.add(scanButton);
+		optionPane.add(cancelButton);
 
 		String[] columnNames = { "Status", "IP Address", "Ping" };
 		Object[][] initialData = {};
@@ -126,7 +144,7 @@ public class App {
 			}
 		};
 		this.table = new JTable(tableModel);
-		table.getColumnModel().getColumn(0).setMaxWidth(50);
+		table.getColumnModel().getColumn(0).setMaxWidth(60);
 
 		TableRowSorter<TableModel> sorter = new TableRowSorter<TableModel>(this.table.getModel());
 		table.setRowSorter(sorter);
@@ -155,17 +173,22 @@ public class App {
 			String prefix = subnet.substring(0, prefixLength).replaceAll("0", "1");
 			String suffix = subnet.substring(prefixLength, subnet.length());
 			subnet = prefix + suffix;
+			String subnetMask = "";
 
 			for (int i = 0; i < localhost.getAddress().length; i++) {
 				int mask = Integer.parseInt(subnet.substring(i * 8, i * 8 + 8), 2);
+				subnetMask += mask + ".";
 				buffer[i] = String.valueOf(localhost.getAddress()[i] & mask);
 			}
+			subnetMask = subnetMask.substring(0, subnetMask.length() - 1);
 
 			this.startIP = String.join(".", buffer);
 			this.stopIP = interfaceAddress.getBroadcast().getHostAddress();
 			this.currentIP = this.startIP;
 			start.setText(startIP);
 			end.setText(stopIP);
+			currentIPLabel.setText("Your IP: " + localhost.getHostAddress());
+			subnetLabel.setText("Subnet Mask: " + subnetMask);
 		} catch (UnknownHostException | SocketException e) {
 			e.printStackTrace();
 		}
@@ -200,17 +223,24 @@ public class App {
 			nextIP();
 			String currentIP = this.currentIP;
 			Future<?> future = executorService.submit(() -> {
-				this.thread.setText(
-						"Thread: " + executorService.getActiveCount() + "/" + executorService.getMaximumPoolSize());
-				tableModel.addRow(new Object[] { yellow, currentIP, "" });
-				long startTime = System.currentTimeMillis();
+
 				updateNumber(0);
-				this.pinging.setText("Pinging: " + this.pingCount);
+				try {
+					SwingUtilities.invokeAndWait(() -> {
+						this.thread.setText("Thread: " + executorService.getActiveCount() + "/"
+								+ executorService.getMaximumPoolSize());
+						tableModel.addRow(new Object[] { yellow, currentIP, "" });
+						this.pinging.setText("Pinging: " + this.pingCount);
+					});
+				} catch (InvocationTargetException | InterruptedException e2) {
+					e2.printStackTrace();
+				}
 				Process p1;
 				int returnVal = 9999;
+				long startTime = System.currentTimeMillis();
 				try {
 					p1 = java.lang.Runtime.getRuntime().exec(
-							String.format("ping -c 1 -t %d %s", Integer.parseInt(maxThread.getText()), currentIP));
+							String.format("ping -c 1 -t %d %s", Integer.parseInt(maxTimeout.getText()), currentIP));
 					returnVal = p1.waitFor();
 				} catch (IOException e1) {
 					e1.printStackTrace();
@@ -220,17 +250,29 @@ public class App {
 				System.out.println(currentIP + " - returned " + returnVal);
 				boolean isReachable = (returnVal == 0);
 				if (isReachable) {
-					long ping = System.currentTimeMillis() - startTime;
-					tableModel.setValueAt(green, getRowIndex(currentIP), COLUMN_STATUS);
-					tableModel.setValueAt(ping + "ms", getRowIndex(currentIP), COLUMN_PING);
 					updateNumber(1);
-					this.online.setText("Online: " + this.onlineCount);
+					try {
+						long ping = System.currentTimeMillis() - startTime;
+						SwingUtilities.invokeAndWait(() -> {
+							tableModel.setValueAt(green, getRowIndex(currentIP), COLUMN_STATUS);
+							tableModel.setValueAt(ping + "ms", getRowIndex(currentIP), COLUMN_PING);
+							this.online.setText("Online: " + this.onlineCount);
+						});
+					} catch (InvocationTargetException | InterruptedException e1) {
+						e1.printStackTrace();
+					}
 					System.out.println(currentIP + " - Online");
 				} else {
-					tableModel.setValueAt(red, getRowIndex(currentIP), COLUMN_STATUS);
-					tableModel.setValueAt("-", getRowIndex(currentIP), COLUMN_PING);
 					updateNumber(-1);
-					this.offline.setText("Offline: " + this.offlineCount);
+					try {
+						SwingUtilities.invokeAndWait(() -> {
+							tableModel.setValueAt(red, getRowIndex(currentIP), COLUMN_STATUS);
+							tableModel.setValueAt("-", getRowIndex(currentIP), COLUMN_PING);
+							this.offline.setText("Offline: " + this.offlineCount);
+						});
+					} catch (InvocationTargetException | InterruptedException e1) {
+						e1.printStackTrace();
+					}
 					System.out.println(currentIP + " - Offline");
 				}
 			});
