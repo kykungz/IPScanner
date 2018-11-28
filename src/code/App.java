@@ -204,79 +204,78 @@ public class App {
 	}
 
 	private void onScanClicked(ActionEvent e) {
-		if (executorService != null) {
-			executorService.shutdownNow();
-		}
+		new Thread(() -> {
+			if (executorService != null) {
+				executorService.shutdownNow();
+			}
 
-		this.startIP = this.start.getText();
-		this.stopIP = this.end.getText();
-		this.currentIP = this.startIP;
-		this.offlineCount = 0;
-		this.onlineCount = 0;
-		this.pingCount = 0;
+			this.startIP = this.start.getText();
+			this.stopIP = this.end.getText();
+			this.currentIP = this.startIP;
+			this.offlineCount = 0;
+			this.onlineCount = 0;
+			this.pingCount = 0;
 
-		executorService = (ThreadPoolExecutor) Executors.newFixedThreadPool(Integer.parseInt(maxThread.getText()));
+			executorService = (ThreadPoolExecutor) Executors.newFixedThreadPool(Integer.parseInt(maxThread.getText()));
 
-		DefaultTableModel tableModel = (DefaultTableModel) this.table.getModel();
-		tableModel.setRowCount(0);
-		while (hasNextIP()) {
-			nextIP();
-			String currentIP = this.currentIP;
-			Future<?> future = executorService.submit(() -> {
-
-				updateNumber(0);
-				try {
-					SwingUtilities.invokeAndWait(() -> {
-						this.thread.setText("Thread: " + executorService.getActiveCount() + "/"
-								+ executorService.getMaximumPoolSize());
-						tableModel.addRow(new Object[] { yellow, currentIP, "" });
-						this.pinging.setText("Pinging: " + this.pingCount);
-					});
-				} catch (InvocationTargetException | InterruptedException e2) {
-					e2.printStackTrace();
-				}
-				Process p1;
-				int returnVal = 9999;
-				long startTime = System.currentTimeMillis();
-				try {
-					p1 = java.lang.Runtime.getRuntime().exec(
-							String.format("ping -c 1 -t %d %s", Integer.parseInt(maxTimeout.getText()), currentIP));
-					returnVal = p1.waitFor();
-				} catch (IOException e1) {
-					e1.printStackTrace();
-				} catch (InterruptedException e1) {
-					e1.printStackTrace();
-				}
-				System.out.println(currentIP + " - returned " + returnVal);
-				boolean isReachable = (returnVal == 0);
-				if (isReachable) {
-					updateNumber(1);
-					try {
-						long ping = System.currentTimeMillis() - startTime;
-						SwingUtilities.invokeAndWait(() -> {
-							tableModel.setValueAt(green, getRowIndex(currentIP), COLUMN_STATUS);
-							tableModel.setValueAt(ping + "ms", getRowIndex(currentIP), COLUMN_PING);
-							this.online.setText("Online: " + this.onlineCount);
-						});
-					} catch (InvocationTargetException | InterruptedException e1) {
-						e1.printStackTrace();
-					}
-					System.out.println(currentIP + " - Online");
-				} else {
-					updateNumber(-1);
+			DefaultTableModel tableModel = (DefaultTableModel) this.table.getModel();
+			tableModel.setRowCount(0);
+			while (hasNextIP()) {
+				nextIP();
+				String currentIP = this.currentIP;
+				Future<?> future = executorService.submit(() -> {
+					updateNumber(0);
 					try {
 						SwingUtilities.invokeAndWait(() -> {
-							tableModel.setValueAt(red, getRowIndex(currentIP), COLUMN_STATUS);
-							tableModel.setValueAt("-", getRowIndex(currentIP), COLUMN_PING);
-							this.offline.setText("Offline: " + this.offlineCount);
+							this.thread.setText("Thread: " + executorService.getActiveCount() + "/"
+									+ executorService.getMaximumPoolSize());
+							tableModel.addRow(new Object[] { yellow, currentIP, "" });
+							this.pinging.setText("Pinging: " + this.pingCount);
 						});
-					} catch (InvocationTargetException | InterruptedException e1) {
+					} catch (InvocationTargetException | InterruptedException e2) {
+						e2.printStackTrace();
+					}
+					Process p1;
+					int returnVal = 9999;
+					long startTime = System.currentTimeMillis();
+					try {
+						p1 = java.lang.Runtime.getRuntime().exec(
+								String.format("ping -c 1 -t %d %s", Integer.parseInt(maxTimeout.getText()), currentIP));
+						returnVal = p1.waitFor();
+					} catch (IOException e1) {
+						e1.printStackTrace();
+					} catch (InterruptedException e1) {
 						e1.printStackTrace();
 					}
-					System.out.println(currentIP + " - Offline");
-				}
-			});
-		}
+					boolean isReachable = (returnVal == 0);
+					if (isReachable) {
+						updateNumber(1);
+						try {
+							long ping = System.currentTimeMillis() - startTime;
+							SwingUtilities.invokeAndWait(() -> {
+								tableModel.setValueAt(green, getRowIndex(currentIP), COLUMN_STATUS);
+								tableModel.setValueAt(ping + "ms", getRowIndex(currentIP), COLUMN_PING);
+								this.online.setText("Online: " + this.onlineCount);
+							});
+						} catch (InvocationTargetException | InterruptedException e1) {
+							e1.printStackTrace();
+						}
+						System.out.println(currentIP + " - Online");
+					} else {
+						updateNumber(-1);
+						try {
+							SwingUtilities.invokeAndWait(() -> {
+								tableModel.setValueAt(red, getRowIndex(currentIP), COLUMN_STATUS);
+								tableModel.setValueAt("-", getRowIndex(currentIP), COLUMN_PING);
+								this.offline.setText("Offline: " + this.offlineCount);
+							});
+						} catch (InvocationTargetException | InterruptedException e1) {
+							e1.printStackTrace();
+						}
+					}
+				});
+			}
+		}).start();
 	}
 
 	private void updateNumber(int amount) {
@@ -306,7 +305,9 @@ public class App {
 			String padded = "00000000".substring(unpadded.length()) + unpadded;
 			return padded;
 		}).collect(Collectors.joining());
+		System.out.println(Long.parseLong(currentIPs, 2));
 		String nextBinaryIP = Long.toBinaryString(Long.parseLong(currentIPs, 2) + 1);
+		nextBinaryIP = "00000000000000000000000000000000".substring(nextBinaryIP.length()) + nextBinaryIP;
 		String nextIP = Arrays.stream(nextBinaryIP.split("(?<=\\G........)"))
 				.map(x -> String.valueOf(Integer.parseInt(x, 2))).collect(Collectors.joining("."));
 		this.currentIP = nextIP;
